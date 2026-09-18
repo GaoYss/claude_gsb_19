@@ -55,6 +55,15 @@ def green_space_profile(space_id):
     return ok(GreenSpaceService.detail(space_id))
 
 
+@bp.get("/green-spaces/<int:space_id>/timeline")
+def green_space_timeline(space_id):
+    """统一时间线：任务、养护记录、绿植更换按日期合并，支持 types 类型筛选。"""
+
+    raw_types = request.args.getlist("types")
+    types = [item.strip() for value in raw_types for item in value.split(",") if item.strip()]
+    return ok(GreenSpaceService.timeline(space_id, types=types or None))
+
+
 @bp.put("/green-spaces/<int:space_id>")
 def update_green_space(space_id):
     payload = validate_green_space(json_body())

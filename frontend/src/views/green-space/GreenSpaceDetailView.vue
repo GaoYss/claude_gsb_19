@@ -45,6 +45,13 @@
 
     <div class="panel">
       <el-tabs v-model="activeTab">
+        <el-tab-pane name="timeline">
+          <template #label>
+            <span class="tab-label"><el-icon><Clock /></el-icon>养护时间线</span>
+          </template>
+          <GreenSpaceTimeline v-if="activeTab === 'timeline'" :space-id="route.params.id" @changed="load" />
+        </el-tab-pane>
+
         <el-tab-pane label="近期养护任务" name="tasks">
           <div class="tab-actions">
             <el-button link type="primary" @click="goList('tasks')">查看全部养护任务</el-button>
@@ -145,12 +152,13 @@ import StatCard from '@/components/common/StatCard.vue'
 import { formatArea, formatCurrency, formatDate, formatHours, formatNumber } from '@/utils/format'
 
 import GreenSpaceFormDialog from './GreenSpaceFormDialog.vue'
+import GreenSpaceTimeline from './GreenSpaceTimeline.vue'
 
 const route = useRoute()
 const router = useRouter()
 const formDialog = ref(null)
 const loading = ref(false)
-const activeTab = ref('tasks')
+const activeTab = ref('timeline')
 
 const space = ref({})
 const statistics = ref({ task_status: {}, record_count: 0, total_work_hours: 0, replacement_count: 0, replacement_quantity: 0, replacement_amount: 0 })
@@ -192,6 +200,12 @@ onMounted(load)
 </script>
 
 <style scoped>
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .tab-actions {
   display: flex;
   justify-content: flex-end;

@@ -22,6 +22,14 @@ class GreenSpaceService(BaseService):
     code_field = "code"
     code_width = 4
 
+    #: 统一时间线支持的事件类型：养护任务 / 养护记录 / 绿植更换
+    TIMELINE_TYPES = ("task", "record", "replacement")
+    #: 相邻两条动态间隔超过该天数，视为养护空档并在时间线上突出
+    TIMELINE_LONG_GAP_DAYS = 30
+
+    # 同日事件的展示先后（数值大的排在前面）
+    _TIMELINE_ORDER = {"replacement": 2, "record": 1, "task": 0}
+
     SORTABLE = {
         "code": GreenSpace.code,
         "name": GreenSpace.name,
@@ -243,6 +251,147 @@ class GreenSpaceService(BaseService):
             "recent_tasks": [item.to_dict() for item in recent_tasks],
             "recent_records": [item.to_dict() for item in recent_records],
             "recent_replacements": [item.to_dict() for item in recent_replacements],
+        }
+
+    @classmethod
+    def timeline(cls, obj_id, types=None):
+        """统一时间线：任务计划、养护记录、绿植更换按日期倒序合并。
+
+        相邻两条事件之间给出间隔天数，间隔超过 TIMELINE_LONG_GAP_DAYS
+        视为养护空档（is_long_gap=True），供前端突出展示。
+        筛选后重新计算间隔，保证高亮区段与当前筛选结果一致。
+        """
+
+        space = cls.get(obj_id)
+        wanted = {item for item in (types or ()) if item in cls.TIMELINE_TYPES}
+        if not wanted:
+            wanted = set(cls.TIMELINE_TYPES)
+
+        # 各类型总数不受筛选影响，供前端展示固定的数量徽标
+        counts = {
+            "task": db.session.query(func.count(MaintenanceTask.id))
+            .filter(MaintenanceTask.green_space_id == space.id)
+            .scalar()
+            or 0,
+            "record": db.session.query(func.count(MaintenanceRecord.id))
+            .filter(MaintenanceRecord.green_space_id == space.id)
+            .scalar()
+            or 0,
+            "replacement": db.session.query(func.count(PlantReplacement.id))
+            .filter(PlantReplacement.green_space_id == space.id)
+            .scalar()
+            or 0,
+        }
+
+        events = []
+        if "task" in wanted:
+            tasks = db.session.query(MaintenanceTask).filter(
+                MaintenanceTask.green_space_id == space.id
+            ).all()
+            events.extend(cls._timeline_task(item) for item in tasks)
+        if "record" in wanted:
+            records = db.session.query(MaintenanceRecord).filter(
+                MaintenanceRecord.green_space_id == space.id
+            ).all()
+            events.extend(cls._timeline_record(item) for item in records)
+        if "replacement" in wanted:
+            replacements = db.session.query(PlantReplacement).filter(
+                PlantReplacement.green_space_id == space.id
+            ).all()
+            events.extend(cls._timeline_replacement(item) for item in replacements)
+
+        # 日期倒序；同日按 更换 → 记录 →任务 排列，同类型新登记的在前
+        events.sort(
+            key=lambda item: (item["event_date"], cls._TIMELINE_ORDER[item["type"]], item["ref_id"]),
+            reverse=True,
+        )
+
+        long_gap_count = 0
+        longest_gap = 0
+        for index, event in enumerate(events):
+            if index == len(events) - 1:
+                event["gap_days"] = None
+                event["is_long_gap"] = False
+                continue
+            gap = (event["_date"] - events[index + 1]["_date"]).days
+            event["gap_days"] = gap
+            event["is_long_gap"] = gap > cls.TIMELINE_LONG_GAP_DAYS
+            longest_gap = max(longest_gap, gap)
+            if event["is_long_gap"]:
+                long_gap_count += 1
+
+        for event in events:
+            event.pop("_date", None)
+
+        return {
+            "items": events,
+            "long_gap_days": cls.TIMELINE_LONG_GAP_DAYS,
+            "statistics": {
+                "total": len(events),
+                "task_count": counts["task"],
+                "record_count": counts["record"],
+                "replacement_count": counts["replacement"],
+                "long_gap_count": long_gap_count,
+                "longest_gap_days": longest_gap,
+            },
+        }
+
+    @staticmethod
+    def _timeline_task(item):
+        return {
+            "type": "task",
+            "type_label": "养护任务",
+            "event_date": format_date(item.plan_date),
+            "no": item.task_no,
+            "title": item.title,
+            "category": item.task_type,
+            "category_label": ENUM_GROUPS["task_type"].label(item.task_type),
+            "status": item.status,
+            "status_label": ENUM_GROUPS["task_status"].label(item.status),
+            "is_overdue": item.is_overdue,
+            "executor": item.executor,
+            "ref_id": item.id,
+            "_date": item.plan_date,
+        }
+
+    @staticmethod
+    def _timeline_record(item):
+        return {
+            "type": "record",
+            "type_label": "养护记录",
+            "event_date": format_date(item.record_date),
+            "no": item.record_no,
+            "title": item.work_content,
+            "category": item.weather,
+            "category_label": ENUM_GROUPS["weather"].label(item.weather) if item.weather else None,
+            "status": item.quality_result,
+            "status_label": ENUM_GROUPS["quality_result"].label(item.quality_result),
+            "is_overdue": False,
+            "worker": item.worker,
+            "work_hours": to_float(item.work_hours),
+            "ref_id": item.id,
+            "_date": item.record_date,
+        }
+
+    @staticmethod
+    def _timeline_replacement(item):
+        return {
+            "type": "replacement",
+            "type_label": "绿植更换",
+            "event_date": format_date(item.replace_date),
+            "no": item.replacement_no,
+            "title": item.plant_name,
+            "category": item.reason,
+            "category_label": ENUM_GROUPS["replacement_reason"].label(item.reason),
+            "status": item.plant_category,
+            "status_label": ENUM_GROUPS["plant_category"].label(item.plant_category),
+            "is_overdue": False,
+            "executor": item.operator,
+            "quantity": to_float(item.quantity) or 0,
+            "unit_label": ENUM_GROUPS["measure_unit"].label(item.unit),
+            "amount": to_float(item.amount) or 0,
+            "ref_id": item.id,
+            "_date": item.replace_date,
         }
 
     # ------------------------------------------------------------ 写入
