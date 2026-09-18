@@ -1,5 +1,7 @@
 """绿地台账业务逻辑。"""
 
+from datetime import date
+
 from sqlalchemy import and_, func, or_
 
 from ..constants import ENUM_GROUPS, GREEN_SPACE_STATUS
@@ -21,6 +23,15 @@ class GreenSpaceService(BaseService):
     label = "绿地台账"
     code_field = "code"
     code_width = 4
+
+    TIMELINE_TYPES = (
+        ("task", "养护任务"),
+        ("record", "养护记录"),
+        ("replacement", "绿植更换"),
+    )
+
+    # 相邻两次活动超过该天数视为养护空档，与统计卡 30 天未养护口径一致
+    LONG_GAP_DAYS = 30
 
     SORTABLE = {
         "code": GreenSpace.code,
@@ -216,6 +227,8 @@ class GreenSpaceService(BaseService):
             .all()
         )
 
+        timeline = cls.build_timeline(space.id)
+
         return {
             "green_space": space.to_dict(detail=True),
             "statistics": {
@@ -243,7 +256,103 @@ class GreenSpaceService(BaseService):
             "recent_tasks": [item.to_dict() for item in recent_tasks],
             "recent_records": [item.to_dict() for item in recent_records],
             "recent_replacements": [item.to_dict() for item in recent_replacements],
+            "timeline": timeline,
         }
+
+    # ------------------------------------------------------------ 时间线
+    @classmethod
+    def build_timeline(cls, space_id, types=None):
+        """把任务、养护记录与绿植更换按日期合并成统一时间线（倒序）。
+
+        每个事件除了自身字段，还带有 type/type_label/event_date/event_title，
+        以及与下一条（更早）事件之间的间隔天数 gap_days；超过阈值的间隔会被
+        标记为长间隔，便于前端突出显示养护空档。
+        """
+
+        type_set = cls._normalize_timeline_types(types)
+        events = []
+        if "task" in type_set:
+            tasks = (
+                db.session.query(MaintenanceTask)
+                .filter(MaintenanceTask.green_space_id == space_id)
+                .all()
+            )
+            events.extend(cls._task_event(item) for item in tasks)
+        if "record" in type_set:
+            records = (
+                db.session.query(MaintenanceRecord)
+                .filter(MaintenanceRecord.green_space_id == space_id)
+                .all()
+            )
+            events.extend(cls._record_event(item) for item in records)
+        if "replacement" in type_set:
+            replacements = (
+                db.session.query(PlantReplacement)
+                .filter(PlantReplacement.green_space_id == space_id)
+                .all()
+            )
+            events.extend(cls._replacement_event(item) for item in replacements)
+
+        events.sort(key=lambda item: (item["event_date"], item["id"]), reverse=True)
+        for index, event in enumerate(events):
+            if index < len(events) - 1:
+                gap = (
+                    date.fromisoformat(event["event_date"])
+                    - date.fromisoformat(events[index + 1]["event_date"])
+                ).days
+                event["gap_days"] = gap
+                event["is_long_gap"] = gap >= cls.LONG_GAP_DAYS
+            else:
+                event["gap_days"] = None
+                event["is_long_gap"] = False
+        return events
+
+    @staticmethod
+    def _normalize_timeline_types(types):
+        allowed = {name for name, _ in GreenSpaceService.TIMELINE_TYPES}
+        if not types:
+            return allowed
+        selected = {item.strip() for item in types.split(",") if item.strip()}
+        return selected & allowed or allowed
+
+    @staticmethod
+    def _task_event(item):
+        data = item.to_dict()
+        data.update(
+            {
+                "type": "task",
+                "type_label": "养护任务",
+                "event_date": data["plan_date"],
+                "event_title": item.title,
+            }
+        )
+        return data
+
+    @staticmethod
+    def _record_event(item):
+        data = item.to_dict()
+        data.update(
+            {
+                "type": "record",
+                "type_label": "养护记录",
+                "event_date": data["record_date"],
+                "event_title": item.work_content,
+            }
+        )
+        return data
+
+    @staticmethod
+    def _replacement_event(item):
+        data = item.to_dict()
+        data.update(
+            {
+                "type": "replacement",
+                "type_label": "绿植更换",
+                "event_date": data["replace_date"],
+                "event_title": f"{item.plant_name} 更换/补植",
+            }
+        )
+        return data
 
     # ------------------------------------------------------------ 写入
     @classmethod

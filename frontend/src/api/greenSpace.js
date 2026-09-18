@@ -9,4 +9,6 @@ export const greenSpaceApi = {
   districts: () => http.get('/green-spaces/districts'),
   /** 绿地档案：台账 + 养护概览 + 近期任务/记录/更换 */
   profile: (id) => http.get(`/green-spaces/${id}/profile`),
+  /** 统一养护时间线：types 可选，逗号分隔 task,record,replacement */
+  timeline: (id, params) => http.get(`/green-spaces/${id}/timeline`, { params }),
 }

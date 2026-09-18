@@ -45,6 +45,10 @@
 
     <div class="panel">
       <el-tabs v-model="activeTab">
+        <el-tab-pane label="养护时间线" name="timeline">
+          <SpaceTimeline :space-id="route.params.id" :initial-events="timeline" @changed="load" />
+        </el-tab-pane>
+
         <el-tab-pane label="近期养护任务" name="tasks">
           <div class="tab-actions">
             <el-button link type="primary" @click="goList('tasks')">查看全部养护任务</el-button>
@@ -145,15 +149,17 @@ import StatCard from '@/components/common/StatCard.vue'
 import { formatArea, formatCurrency, formatDate, formatHours, formatNumber } from '@/utils/format'
 
 import GreenSpaceFormDialog from './GreenSpaceFormDialog.vue'
+import SpaceTimeline from './SpaceTimeline.vue'
 
 const route = useRoute()
 const router = useRouter()
 const formDialog = ref(null)
 const loading = ref(false)
-const activeTab = ref('tasks')
+const activeTab = ref('timeline')
 
 const space = ref({})
 const statistics = ref({ task_status: {}, record_count: 0, total_work_hours: 0, replacement_count: 0, replacement_quantity: 0, replacement_amount: 0 })
+const timeline = ref([])
 const recentTasks = ref([])
 const recentRecords = ref([])
 const recentReplacements = ref([])
@@ -173,6 +179,7 @@ async function load() {
     recentRecords.value = data.recent_records || []
     recentReplacements.value = data.recent_replacements || []
     replacementSummary.value = data.replacement_summary || []
+    timeline.value = data.timeline || []
   } finally {
     loading.value = false
   }

@@ -115,6 +115,52 @@ def test_detail_and_profile_aggregate_related_data(api, make_task, make_record):
     assert len(data["recent_records"]) == 2
 
 
+def test_timeline_merges_events_and_marks_long_gaps(api, make_space, make_task, make_record, make_replacement):
+    space = make_space()
+    make_task(space=space, plan_date=date(2026, 1, 5))
+    make_record(space=space, record_date=date(2026, 1, 6))
+    make_replacement(space=space, replace_date=date(2026, 3, 20))
+    make_record(space=space, record_date=date(2026, 3, 25))
+
+    data = api.data(api.get(f"/api/v1/green-spaces/{space.id}/profile"))["timeline"]
+
+    # 倒序：3-25 记录 → 3-20 更换 → 1-06 记录 → 1-05 任务
+    assert [item["event_date"] for item in data] == [
+        "2026-03-25",
+        "2026-03-20",
+        "2026-01-06",
+        "2026-01-05",
+    ]
+    assert [item["type"] for item in data] == ["record", "replacement", "record", "task"]
+    assert data[0]["gap_days"] == 5
+    assert data[0]["is_long_gap"] is False
+    assert data[1]["gap_days"] == 73
+    assert data[1]["is_long_gap"] is True
+    assert data[-1]["gap_days"] is None
+    assert data[-1]["is_long_gap"] is False
+
+
+def test_timeline_endpoint_filters_by_type(api, make_space, make_task, make_record, make_replacement):
+    space = make_space()
+    make_task(space=space, plan_date=date(2026, 2, 1))
+    make_record(space=space, record_date=date(2026, 2, 3))
+    make_replacement(space=space, replace_date=date(2026, 2, 5))
+
+    path = f"/api/v1/green-spaces/{space.id}/timeline"
+    data = api.data(api.get(path, types="task,replacement"))["items"]
+    assert [item["type"] for item in data] == ["replacement", "task"]
+    assert data[0]["gap_days"] == 4
+    assert data[1]["gap_days"] is None
+
+    only_records = api.data(api.get(path, types="record"))["items"]
+    assert [item["type"] for item in only_records] == ["record"]
+
+
+def test_timeline_endpoint_404_for_unknown_space(api):
+    response = api.get("/api/v1/green-spaces/99999/timeline")
+    assert response.status_code == 404
+
+
 def test_delete_is_blocked_until_force(api, make_task):
     task = make_task()
     space_id = task.green_space_id

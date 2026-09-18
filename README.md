@@ -147,7 +147,8 @@ cd frontend && npm run build && npm run preview
 | GET | `/green-spaces/districts` | 行政区及绿地处数 |
 | POST | `/green-spaces` | 新增绿地（编号可留空自动生成） |
 | GET | `/green-spaces/{id}` | 绿地详情 |
-| GET | `/green-spaces/{id}/profile` | 绿地档案（概览统计 + 近期任务/记录/更换） |
+| GET | `/green-spaces/{id}/profile` | 绿地档案（概览统计 + 近期任务/记录/更换 + 统一时间线） |
+| GET | `/green-spaces/{id}/timeline` | 统一养护时间线（`types=task,record,replacement` 可选，含相邻事件间隔天数与 ≥30 天养护空档标记） |
 | PUT | `/green-spaces/{id}` | 更新绿地（编号不可改） |
 | DELETE | `/green-spaces/{id}?force=true` | 删除绿地（有关联数据时需 `force`） |
 | GET/POST | `/maintenance-tasks` | 任务列表 / 登记任务（`status`/`task_type`/`priority`/`green_space_id`/`date_from`/`date_to`/`overdue`） |
